@@ -1,0 +1,7 @@
+Flask
+Flask-SocketIO
+scikit-learn
+joblib
+twilio
+pyserial
+numpy

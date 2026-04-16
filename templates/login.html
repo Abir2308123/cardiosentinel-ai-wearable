@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CardioSentinel — Login</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body class="login-page">
+    <div class="login-wrapper">
+        <!-- Branding -->
+        <div class="login-brand">
+            <span class="pulse-dot"></span>
+            <h1>CARDIO<span class="highlight">SENTINEL</span></h1>
+            <p class="tagline">AI-Powered Cardiac Risk Monitoring</p>
+        </div>
+
+        <!-- Login Card -->
+        <div class="login-card">
+            <h2>Welcome Back</h2>
+            <p class="login-subtitle">Sign in to access your dashboard</p>
+
+            {% if error %}
+            <div class="login-error">
+                <span>⚠</span> {{ error }}
+            </div>
+            {% endif %}
+
+            <form action="/login" method="POST" id="loginForm">
+                <div class="input-group">
+                    <label for="user_id">User ID</label>
+                    <input type="text" id="user_id" name="user_id" placeholder="e.g. patient001" required autocomplete="off">
+                </div>
+
+                <div class="input-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" placeholder="Enter your password" required>
+                </div>
+
+                <!-- Role Selection -->
+                <div class="role-selector">
+                    <p class="role-label">I am a...</p>
+                    <div class="role-options">
+                        <label class="role-option selected" id="rolePatient">
+                            <input type="radio" name="role" value="patient" checked>
+                            <div class="role-card">
+                                <div class="role-icon">🩺</div>
+                                <span class="role-title">Patient</span>
+                                <span class="role-desc">Wearing the band</span>
+                            </div>
+                        </label>
+                        <label class="role-option" id="roleCaretaker">
+                            <input type="radio" name="role" value="caretaker">
+                            <div class="role-card">
+                                <div class="role-icon">👨‍👧</div>
+                                <span class="role-title">Caretaker</span>
+                                <span class="role-desc">Family / Guardian</span>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <button type="submit" class="login-btn">Sign In</button>
+            </form>
+
+            <div class="demo-credentials">
+                <p>Demo: <strong>demo</strong> / <strong>demo</strong></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Toggle visual selection state on role cards
+        document.querySelectorAll('.role-option').forEach(opt => {
+            opt.addEventListener('click', () => {
+                document.querySelectorAll('.role-option').forEach(o => o.classList.remove('selected'));
+                opt.classList.add('selected');
+            });
+        });
+    </script>
+</body>
+</html>

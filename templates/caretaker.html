@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CardioSentinel — Caretaker Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <div class="app-shell">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar-nav caretaker-nav">
+            <div class="nav-brand">
+                <span class="pulse-dot"></span>
+                <span class="brand-text">CS</span>
+            </div>
+
+            <div class="nav-tabs">
+                <button class="nav-tab active" data-tab="vitals" id="tabVitals">
+                    <span class="tab-icon">💓</span>
+                    <span class="tab-label">Vitals</span>
+                </button>
+                <button class="nav-tab" data-tab="alerts" id="tabAlerts">
+                    <span class="tab-icon">🔔</span>
+                    <span class="tab-label">Alerts</span>
+                    <span class="alert-badge hidden" id="alertBadge">0</span>
+                </button>
+                <button class="nav-tab" data-tab="tracking" id="tabTracking">
+                    <span class="tab-icon">📍</span>
+                    <span class="tab-label">Track</span>
+                </button>
+            </div>
+
+            <div class="nav-footer">
+                <div class="user-badge">
+                    <span class="user-avatar caretaker-avatar">👨‍👧</span>
+                    <span class="user-name">Caretaker</span>
+                </div>
+                <a href="/logout" class="logout-btn">Logout</a>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Top Bar -->
+            <header class="top-bar">
+                <div>
+                    <h1 class="page-title" id="pageTitle">Patient Vitals</h1>
+                    <p class="page-subtitle">Monitoring: <strong>{{ user.patient_name }}</strong> · ID: <strong>{{ user_id }}</strong></p>
+                </div>
+                <div class="top-bar-right">
+                    <div class="connection-chip" id="connectionChip">
+                        <span class="conn-dot connected"></span>
+                        <span id="connectionText">Connected</span>
+                    </div>
+                    <div class="time-chip" id="liveTime"></div>
+                </div>
+            </header>
+
+            <!-- TAB: Vitals (Read-Only view of patient data) -->
+            <section class="tab-content active" id="contentVitals">
+                <div class="caretaker-grid">
+                    <!-- Status Card -->
+                    <div class="widget status-card" id="statusCard">
+                        <h2>Patient Status</h2>
+                        <div class="status-indicator" id="statusValue">AWAITING</div>
+                        <p class="status-subtext">Real-time AI Analysis</p>
+                    </div>
+
+                    <!-- Vitals Row -->
+                    <div class="widget metric-card">
+                        <div class="metric-label">Heart Rate</div>
+                        <div class="metric-big" id="ctHR">--</div>
+                        <div class="metric-unit">BPM</div>
+                    </div>
+                    <div class="widget metric-card">
+                        <div class="metric-label">SpO2</div>
+                        <div class="metric-big" id="ctSpO2">--</div>
+                        <div class="metric-unit">%</div>
+                    </div>
+
+
+                    <!-- Patient Info -->
+                    <div class="widget patient-info-card span-full">
+                        <h3>Patient Information</h3>
+                        <div class="info-grid">
+                            <div class="info-item"><span class="info-key">Name</span><span class="info-val">{{ user.patient_name }}</span></div>
+                            <div class="info-item"><span class="info-key">Age</span><span class="info-val">{{ user.age }} yrs</span></div>
+                            <div class="info-item"><span class="info-key">Blood Group</span><span class="info-val">{{ user.blood_group }}</span></div>
+                            <div class="info-item"><span class="info-key">Emergency</span><span class="info-val">{{ user.emergency_contact }}</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Mini Heart Chart -->
+                    <div class="widget chart-widget span-full">
+                        <h3>Heart Rate Monitor</h3>
+                        <div class="chart-container mini-chart">
+                            <canvas id="ctHrChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Fall + Location Quick -->
+                    <div class="widget quick-info-card">
+                        <h3>Fall Status</h3>
+                        <div class="quick-status" id="ctFall">All Clear</div>
+                    </div>
+                    <div class="widget quick-info-card">
+                        <h3>Location</h3>
+                        <div class="quick-status gps-text" id="ctLocation">Acquiring...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB: Alerts / Notifications -->
+            <section class="tab-content" id="contentAlerts">
+                <div class="alerts-container">
+                    <div class="alerts-header">
+                        <h3>Real-Time Notifications</h3>
+                        <button class="clear-alerts-btn" id="clearAlerts">Clear All</button>
+                    </div>
+                    <div class="alerts-feed" id="alertsFeed">
+                        <div class="empty-alerts">
+                            <span class="empty-icon">🔕</span>
+                            <p>No alerts yet. You'll be notified here in real-time if any anomaly or fall is detected.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB: Tracking -->
+            <section class="tab-content" id="contentTracking">
+                <div class="location-grid">
+                    <div class="widget map-widget">
+                        <h3>Patient Location</h3>
+                        <div class="map-display">
+                            <div id="caretakerMap" style="height: 350px; width: 100%; border-radius: 12px; z-index: 1;"></div>
+                            <p id="ctGpsLocation" class="gps-coords" style="margin-top: 10px;">Acquiring satellites...</p>
+                        </div>
+                        <div class="gps-meta">
+                            <div class="gps-item"><span class="gps-label">Last Update</span><span id="ctGpsTime">--</span></div>
+                            <div class="gps-item"><span class="gps-label">Status</span><span class="gps-active">Active Tracking</span></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Notification Toast (pops up for critical alerts) -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Error Overlay -->
+    <div id="errorOverlay" class="hidden">
+        <div class="error-box">
+            <h2>⚠ CONNECTION LOST</h2>
+            <p id="errorMessage">Connection to patient device lost</p>
+            <button onclick="document.getElementById('errorOverlay').classList.add('hidden')">Dismiss</button>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="{{ url_for('static', filename='js/caretaker.js') }}"></script>
+</body>
+</html>
