@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CardioSentinel | Real-Time Cardiac Monitoring</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.1/socket.io.js"></script>
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="background-blobs">
+        <div class="blob red"></div>
+        <div class="blob purple"></div>
+        <div class="blob blue"></div>
+    </div>
+
+    <div class="app-container">
+        <header class="glass-header">
+            <div class="logo-container">
+                <i class="fa-solid fa-heart-pulse logo-icon"></i>
+                <h1>CardioSentinel</h1>
+            </div>
+            <div class="connection-status">
+                <div id="socket-status-dot" class="status-dot connecting"></div>
+                <span id="socket-status-text">Connecting...</span>
+            </div>
+        </header>
+
+        <main class="dashboard-grid">
+            <!-- Heart Rate Card with Chart -->
+            <div class="glass-card hr-card">
+                <div class="card-header">
+                    <h2><i class="fa-solid fa-heartbeat"></i> Heart Rate</h2>
+                    <div class="metric-value">
+                        <span id="val-hr">--</span>
+                        <span class="unit">bpm</span>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="hrChart"></canvas>
+                </div>
+            </div>
+
+            <!-- SpO2 Card -->
+            <div class="glass-card spo2-card">
+                <div class="card-header">
+                    <h2><i class="fa-solid fa-lungs"></i> Oxygen Saturation</h2>
+                </div>
+                <div class="metric-display circle-metric">
+                    <div class="progress-ring">
+                        <svg width="120" height="120">
+                            <circle class="ring-bg" cx="60" cy="60" r="54"></circle>
+                            <circle class="ring-fill" id="spo2-ring" cx="60" cy="60" r="54" style="stroke-dashoffset: 339.292;"></circle>
+                        </svg>
+                        <div class="ring-text">
+                            <span id="val-spo2">--</span><span class="unit">%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Risk Status Panel -->
+            <div class="glass-card risk-card">
+                <div class="card-header">
+                    <h2><i class="fa-solid fa-triangle-exclamation"></i> AI Analysis</h2>
+                </div>
+                <div class="risk-metrics">
+                    <div class="risk-item" id="arrhythmia-status-panel">
+                        <span class="risk-label">Arrhythmia Risk</span>
+                        <span class="risk-value" id="val-arrhythmia">Pending Analysis</span>
+                        <i id="icon-arrhythmia" class="fa-solid fa-circle-notch fa-spin"></i>
+                    </div>
+                    <div class="risk-item" id="fall-status-panel">
+                        <span class="risk-label">Fall Detection</span>
+                        <span class="risk-value" id="val-fall">Monitoring</span>
+                        <i id="icon-fall" class="fa-solid fa-person-walking"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Other Metrics -->
+            <div class="glass-card secondary-metrics">
+                <div class="metric-row">
+                    <div class="metric-col">
+                        <h3><i class="fa-solid fa-wave-square"></i> HRV</h3>
+                        <div class="small-val"><span id="val-hrv">--</span> ms</div>
+                    </div>
+                    <div class="metric-col">
+                        <h3><i class="fa-solid fa-bolt"></i> Motion Energy</h3>
+                        <div class="small-val"><span id="val-motion">--</span> g</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- GPS Location Card -->
+             <div class="glass-card location-card">
+                <div class="card-header">
+                    <h2><i class="fa-solid fa-location-dot"></i> Real-time Location</h2>
+                </div>
+                <div class="location-data">
+                    <div class="coord">
+                        <span class="coord-label">LATITUDE</span>
+                        <span class="coord-val" id="val-lat">--.------</span>
+                    </div>
+                    <div class="coord">
+                        <span class="coord-label">LONGITUDE</span>
+                        <span class="coord-val" id="val-lng">--.------</span>
+                    </div>
+                </div>
+             </div>
+        </main>
+    </div>
+
+    <!-- Custom JS -->
+    <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+</html>
