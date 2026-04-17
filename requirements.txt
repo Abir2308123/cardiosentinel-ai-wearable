@@ -6,3 +6,4 @@ twilio
 pyserial
 numpy
 smbus2
+serial
