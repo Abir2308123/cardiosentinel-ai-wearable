@@ -22,6 +22,7 @@ import logging
 from datetime import datetime
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 from flask_socketio import SocketIO, emit, join_room, leave_room
+from collections import deque
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
@@ -190,14 +191,22 @@ class SignalProcessor:
 processor = SignalProcessor()
 
 # ---------------------------------------------------------
-# Background Sensor Polling Thread
+# Background Sensor Polling Thread (mock fallback)
 # ---------------------------------------------------------
+last_esp32_data_time = time.time()
+USE_MOCK_FALLBACK = True   # Set False to rely only on ESP32
+
 def sensor_loop():
-    global latest_sensor_data
-    print("Starting sensor polling loop...")
+    global latest_sensor_data, last_esp32_data_time
+    print("Starting mock sensor polling loop (fallback mode)...")
     fall_debounce = 0
     
     while True:
+        # If ESP32 data arrived recently, skip mock generation
+        if time.time() - last_esp32_data_time < 10:
+            time.sleep(1)
+            continue
+
         try:
             raw_hr = np.random.uniform(60, 100)
             raw_spo2 = np.random.uniform(96, 100)
@@ -336,6 +345,81 @@ def get_alerts():
     return jsonify(alert_history[-20:])
 
 # ---------------------------------------------------------
+# ESP32 Data Ingestion Endpoint
+# ---------------------------------------------------------
+@app.route('/api/sensor-data', methods=['POST'])
+def receive_sensor_data():
+    global last_esp32_data_time, latest_sensor_data
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid JSON'}), 400
+
+        # Extract fields sent by ESP32
+        hr = data.get('heart_rate', 0)
+        spo2 = data.get('spo2', 0)
+        g_force = data.get('g_force', 0.0)
+        fall = data.get('fall_detected', False)
+        lat = data.get('latitude', 0.0)
+        lng = data.get('longitude', 0.0)
+        temp = data.get('temperature', 0.0)
+
+        # Update last receive time
+        last_esp32_data_time = time.time()
+
+        # Maintain rolling HR buffer for HRV calculation (std of last 10 HR values)
+        if not hasattr(receive_sensor_data, 'hr_history'):
+            receive_sensor_data.hr_history = deque(maxlen=10)
+        if hr > 0:
+            receive_sensor_data.hr_history.append(hr)
+        hrv = np.std(receive_sensor_data.hr_history) if len(receive_sensor_data.hr_history) > 1 else 50.0
+
+        # Use g_force as motion_energy
+        motion_energy = float(g_force)
+
+        # Run prediction (ML or rule-based)
+        if USE_ML and model is not None:
+            X = np.array([[hr, spo2, hrv, motion_energy]])
+            pred = model.predict(X)[0]
+            status = "Abnormal" if pred == 1 else "Normal"
+        else:
+            pred = rule_based_predict(hr, spo2, hrv, motion_energy)
+            status = "Abnormal" if pred == 1 else "Normal"
+
+        # Trigger alerts if needed
+        if status == "Abnormal":
+            send_alert(f"Cardiac anomaly from ESP32: HR={hr}, SpO2={spo2}")
+        if fall:
+            send_alert("EMERGENCY: Fall detected by ESP32!")
+
+        # Build payload for WebSocket clients
+        location_str = f"https://maps.google.com/?q={lat},{lng}" if lat != 0 and lng != 0 else "GPS not fixed"
+        payload = {
+            'raw_hr': hr,
+            'raw_spo2': spo2,
+            'mean_hr': hr,
+            'hrv': round(hrv, 2),
+            'spo2': spo2,
+            'motion_energy': motion_energy,
+            'status': status,
+            'fall_detected': fall,
+            'location': location_str,
+            'temperature': temp,
+            'timestamp': datetime.now().strftime('%H:%M:%S')
+        }
+        latest_sensor_data = payload
+
+        # Broadcast to all connected clients
+        socketio.emit('sensor_data', payload, room='patients')
+        socketio.emit('sensor_data', payload, room='caretakers')
+
+        return jsonify({'status': 'ok'}), 200
+
+    except Exception as e:
+        logging.error(f"Error processing sensor data: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ---------------------------------------------------------
 # WebSocket Events
 # ---------------------------------------------------------
 @socketio.on('join')
@@ -350,6 +434,7 @@ def on_join(data):
         join_room('patients')
 
 if __name__ == '__main__':
-    sensor_thread = threading.Thread(target=sensor_loop, daemon=True)
-    sensor_thread.start()
+    if USE_MOCK_FALLBACK:
+        sensor_thread = threading.Thread(target=sensor_loop, daemon=True)
+        sensor_thread.start()
     socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
