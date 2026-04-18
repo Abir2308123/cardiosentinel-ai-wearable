@@ -1,81 +1,80 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CardioSentinel — Login</title>
+<title>CardioSentinel Login</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
 
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+body {
+    margin:0;
+    font-family:Inter;
+    background:#0f172a;
+    color:white;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    height:100vh;
+}
 
-    <style>
-        body {
-            margin: 0;
-            font-family: 'Inter', sans-serif;
-            background: #0f172a;
-            color: white;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-        }
+.card {
+    background:#1e293b;
+    padding:30px;
+    border-radius:15px;
+    width:320px;
+    text-align:center;
+}
 
-        .card {
-            background: #1e293b;
-            padding: 30px;
-            border-radius: 12px;
-            width: 320px;
-            text-align: center;
-        }
+input {
+    width:100%;
+    padding:10px;
+    margin:10px 0;
+    border:none;
+    border-radius:8px;
+}
 
-        input {
-            width: 100%;
-            padding: 10px;
-            margin: 10px 0;
-            border: none;
-            border-radius: 6px;
-        }
+button {
+    width:100%;
+    padding:10px;
+    background:#3b82f6;
+    color:white;
+    border:none;
+    border-radius:8px;
+    cursor:pointer;
+}
 
-        button {
-            width: 100%;
-            padding: 10px;
-            background: #3b82f6;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-        }
+.role {
+    display:flex;
+    gap:10px;
+    margin:10px 0;
+}
 
-        .error {
-            color: #ef4444;
-            margin-bottom: 10px;
-        }
-    </style>
+.role button {
+    flex:1;
+    background:#334155;
+}
+</style>
 </head>
 
 <body>
 
 <div class="card">
-    <h2>🔐 CardioSentinel Login</h2>
+    <h2>🚀 CardioSentinel</h2>
 
     {% if error %}
-    <div class="error">{{ error }}</div>
+    <p style="color:red;">{{ error }}</p>
     {% endif %}
 
-    <!-- ✅ FIXED FORM -->
     <form method="POST" action="/login">
+        <input name="username" placeholder="Username" required>
+        <input name="password" type="password" placeholder="Password" required>
 
-        <!-- ✅ IMPORTANT: name="username" -->
-        <input type="text" name="username" placeholder="Username" required>
-
-        <!-- password stays same -->
-        <input type="password" name="password" placeholder="Password" required>
-
-        <button type="submit">Login</button>
+        <div class="role">
+            <button type="submit" name="role" value="patient">Patient</button>
+            <button type="submit" name="role" value="caretaker">Caretaker</button>
+        </div>
     </form>
 
-    <p style="margin-top:10px;">
-        Demo: <b>admin</b> / <b>admin123</b>
-    </p>
+    <p>Demo: admin / admin123</p>
 </div>
 
 </body>
