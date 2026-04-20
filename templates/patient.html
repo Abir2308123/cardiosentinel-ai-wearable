@@ -1,174 +1,189 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CardioSentinel — Patient Dashboard</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@400;500;700&display=swap" rel="stylesheet">
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+<title>Patient Dashboard</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<style>
+body {
+    background:#0f172a;
+    color:white;
+    font-family:Inter;
+    margin:0;
+}
+
+.header {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:15px 20px;
+    background:#020617;
+}
+
+.logout {
+    background:#ef4444;
+    border:none;
+    padding:8px 12px;
+    border-radius:6px;
+    color:white;
+    cursor:pointer;
+}
+
+.container {
+    padding:20px;
+}
+
+.card {
+    background:#1e293b;
+    padding:15px;
+    border-radius:10px;
+    margin:10px 0;
+}
+
+.chart-row {
+    display:flex;
+    gap:20px;
+}
+
+.map-card {
+    height:300px;
+}
+
+#map {
+    height:100%;
+    border-radius:10px;
+}
+</style>
 </head>
+
 <body>
-    <div class="app-shell">
-        <!-- Sidebar Navigation -->
-        <nav class="sidebar-nav">
-            <div class="nav-brand">
-                <span class="pulse-dot"></span>
-                <span class="brand-text">CS</span>
-            </div>
 
-            <div class="nav-tabs">
-                <button class="nav-tab active" data-tab="overview" id="tabOverview">
-                    <span class="tab-icon">📊</span>
-                    <span class="tab-label">Overview</span>
-                </button>
-                <button class="nav-tab" data-tab="cardiac" id="tabCardiac">
-                    <span class="tab-icon">❤️</span>
-                    <span class="tab-label">Cardiac</span>
-                </button>
-                <button class="nav-tab" data-tab="location" id="tabLocation">
-                    <span class="tab-icon">📍</span>
-                    <span class="tab-label">Location</span>
-                </button>
-            </div>
+<!-- 🔥 HEADER -->
+<div class="header">
+    <h2>🩺 Patient Dashboard</h2>
+    <button class="logout" onclick="logout()">Logout</button>
+</div>
 
-            <div class="nav-footer">
-                <div class="user-badge">
-                    <span class="user-avatar">{{ user.patient_name[0] }}</span>
-                    <span class="user-name">{{ user.patient_name }}</span>
-                </div>
-                <a href="/logout" class="logout-btn">Logout</a>
-            </div>
-        </nav>
+<div class="container">
 
-        <!-- Main Content -->
-        <main class="main-content">
-            <!-- Top Bar -->
-            <header class="top-bar">
-                <div>
-                    <h1 class="page-title" id="pageTitle">Overview</h1>
-                    <p class="page-subtitle">Patient: <strong>{{ user.patient_name }}</strong> · ID: <strong>{{ user_id }}</strong></p>
-                </div>
-                <div class="top-bar-right">
-                    <div class="latency-chip">
-                        <span class="latency-dot"></span>
-                        <span id="latency">-</span> ms
-                    </div>
-                    <div class="time-chip" id="liveTime"></div>
-                </div>
-            </header>
+<div class="card">
+    ❤️ Heart Rate: <span id="hr">--</span>
+</div>
 
-            <!-- TAB: Overview -->
-            <section class="tab-content active" id="contentOverview">
-                <div class="overview-grid">
-                    <!-- Status Card -->
-                    <div class="widget status-card" id="statusCard">
-                        <h2>AI Risk Analysis</h2>
-                        <div class="status-indicator" id="statusValue">AWAITING</div>
-                        <p class="status-subtext">Random Forest · On-Device</p>
-                    </div>
+<div class="card">
+    🫁 SpO2: <span id="spo2">--</span>
+</div>
 
-                    <!-- Vital Summary Cards -->
-                    <div class="widget metric-card">
-                        <div class="metric-label">Heart Rate</div>
-                        <div class="metric-big" id="overviewHR">--</div>
-                        <div class="metric-unit">BPM</div>
-                    </div>
-                    <div class="widget metric-card">
-                        <div class="metric-label">SpO2</div>
-                        <div class="metric-big" id="overviewSpO2">--</div>
-                        <div class="metric-unit">%</div>
-                    </div>
-                    <div class="widget metric-card">
-                        <div class="metric-label">HRV</div>
-                        <div class="metric-big" id="overviewHRV">--</div>
-                        <div class="metric-unit">ms</div>
-                    </div>
+<div class="card">
+    📉 G-Force: <span id="g">--</span>
+</div>
 
-                    <!-- Mini HR Chart -->
-                    <div class="widget chart-widget span-2">
-                        <h3>Heart Rate (Live)</h3>
-                        <div class="chart-container mini-chart">
-                            <canvas id="miniHrChart"></canvas>
-                        </div>
-                    </div>
+<!-- 🔥 CHARTS -->
+<div class="chart-row">
 
-                    <!-- Fall + Location Quick Info -->
-                    <div class="widget quick-info-card">
-                        <h3>Fall Detection</h3>
-                        <div class="quick-status" id="overviewFall">All Clear</div>
-                    </div>
-                    <div class="widget quick-info-card">
-                        <h3>GPS Location</h3>
-                        <div class="quick-status gps-text" id="overviewLocation">Acquiring...</div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- TAB: Cardiac -->
-            <section class="tab-content" id="contentCardiac">
-                <div class="charts-full">
-                    <div class="widget chart-card-full">
-                        <div class="chart-header">
-                            <h3>Heart Rate Variability (MAX30102)</h3>
-                            <div class="live-metric">
-                                <span id="meanHrValue" class="metric-value">-</span>
-                                <span class="metric-unit">BPM</span>
-                            </div>
-                        </div>
-                        <div class="chart-container full-chart">
-                            <canvas id="hrChart"></canvas>
-                        </div>
-                    </div>
-
-                    <div class="widget chart-card-full">
-                        <div class="chart-header">
-                            <h3>Blood Oxygen Saturation (SpO2)</h3>
-                            <div class="live-metric">
-                                <span id="spo2Value" class="metric-value">-</span>
-                                <span class="metric-unit">%</span>
-                            </div>
-                        </div>
-                        <div class="chart-container full-chart">
-                            <canvas id="spo2Chart"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- TAB: Location -->
-            <section class="tab-content" id="contentLocation">
-                <div class="location-grid">
-                    <div class="widget map-widget">
-                        <h3>Live GPS Feed (NEO-6M)</h3>
-                        <div class="map-display">
-                            <div id="patientMap" style="height: 350px; width: 100%; border-radius: 12px; z-index: 1;"></div>
-                            <p id="gpsLocation" class="gps-coords">Acquiring satellites...</p>
-                        </div>
-                        <div class="gps-meta">
-                            <div class="gps-item"><span class="gps-label">Module</span><span>NEO-6M (UART)</span></div>
-                            <div class="gps-item"><span class="gps-label">Protocol</span><span>NMEA 0183</span></div>
-                            <div class="gps-item"><span class="gps-label">Update Rate</span><span>1 Hz</span></div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-        </main>
+    <div class="card">
+        <h3>❤️ Heart Rate</h3>
+        <canvas id="hrChart"></canvas>
     </div>
 
-    <!-- Error Overlay -->
-    <div id="errorOverlay" class="hidden">
-        <div class="error-box">
-            <h2>⚠ SYSTEM ALERT</h2>
-            <p id="errorMessage">Sensor Disconnected</p>
-            <button onclick="document.getElementById('errorOverlay').classList.add('hidden')">Dismiss</button>
-        </div>
+    <div class="card">
+        <h3>🫁 SpO2</h3>
+        <canvas id="spo2Chart"></canvas>
     </div>
 
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</div>
+
+<!-- 🔥 MAP -->
+<div class="card map-card">
+    <h3>🗺️ Live Location</h3>
+    <div id="map"></div>
+</div>
+
+</div>
+
+<script>
+let labels = [];
+let hrData = [];
+let spo2Data = [];
+
+/* Charts */
+const hrChart = new Chart(document.getElementById("hrChart"), {
+    type:'line',
+    data:{
+        labels:labels,
+        datasets:[{
+            label:'Heart Rate',
+            data:hrData,
+            borderColor:'#ef4444',
+            tension:0.4
+        }]
+    }
+});
+
+const spo2Chart = new Chart(document.getElementById("spo2Chart"), {
+    type:'line',
+    data:{
+        labels:labels,
+        datasets:[{
+            label:'SpO2',
+            data:spo2Data,
+            borderColor:'#3b82f6',
+            tension:0.4
+        }]
+    }
+});
+
+/* 🔥 MAP SETUP */
+let map = L.map('map').setView([20,77],5);
+
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 18
+}).addTo(map);
+
+let marker = L.marker([20,77]).addTo(map);
+
+/* 🔄 DATA FETCH */
+async function fetchData(){
+    let res = await fetch('/latest');
+    let d = await res.json();
+
+    document.getElementById("hr").innerText = d.heart_rate;
+    document.getElementById("spo2").innerText = d.spo2;
+    document.getElementById("g").innerText = d.g_force;
+
+    let time = new Date().toLocaleTimeString();
+
+    labels.push(time);
+    hrData.push(d.heart_rate);
+    spo2Data.push(d.spo2);
+
+    if(labels.length > 20){
+        labels.shift();
+        hrData.shift();
+        spo2Data.shift();
+    }
+
+    hrChart.update();
+    spo2Chart.update();
+
+    /* 🔥 UPDATE MAP */
+    if(d.latitude && d.longitude && d.latitude != 0){
+        marker.setLatLng([d.latitude, d.longitude]);
+        map.setView([d.latitude, d.longitude], 16);
+    }
+}
+
+setInterval(fetchData, 2000);
+
+/* 🔥 LOGOUT */
+function logout(){
+    window.location.href = "/logout";
+}
+</script>
+
 </body>
 </html>

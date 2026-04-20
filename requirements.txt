@@ -5,3 +5,5 @@ joblib
 twilio
 pyserial
 numpy
+smbus2
+serial

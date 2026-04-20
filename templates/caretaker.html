@@ -1,169 +1,216 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CardioSentinel — Caretaker Dashboard</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@400;500;700&display=swap" rel="stylesheet">
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+<title>Caretaker Dashboard</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<style>
+body {
+    background:#0f172a;
+    color:white;
+    font-family:Inter;
+    margin:0;
+}
+
+.header {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:15px 20px;
+    background:#020617;
+}
+
+.logout {
+    background:#ef4444;
+    border:none;
+    padding:8px 12px;
+    border-radius:6px;
+    color:white;
+    cursor:pointer;
+}
+
+.container {
+    padding:20px;
+}
+
+.card {
+    background:#1e293b;
+    padding:15px;
+    border-radius:10px;
+    margin:10px 0;
+}
+
+.chart-row {
+    display:flex;
+    gap:20px;
+}
+
+.alert {
+    padding:10px;
+    margin:10px 0;
+    border-radius:8px;
+    font-weight:bold;
+}
+
+.danger { background:#dc2626; }
+.warning { background:#f59e0b; }
+.normal { background:#16a34a; }
+
+#map {
+    height:300px;
+    border-radius:10px;
+}
+</style>
 </head>
+
 <body>
-    <div class="app-shell">
-        <!-- Sidebar Navigation -->
-        <nav class="sidebar-nav caretaker-nav">
-            <div class="nav-brand">
-                <span class="pulse-dot"></span>
-                <span class="brand-text">CS</span>
-            </div>
 
-            <div class="nav-tabs">
-                <button class="nav-tab active" data-tab="vitals" id="tabVitals">
-                    <span class="tab-icon">💓</span>
-                    <span class="tab-label">Vitals</span>
-                </button>
-                <button class="nav-tab" data-tab="alerts" id="tabAlerts">
-                    <span class="tab-icon">🔔</span>
-                    <span class="tab-label">Alerts</span>
-                    <span class="alert-badge hidden" id="alertBadge">0</span>
-                </button>
-                <button class="nav-tab" data-tab="tracking" id="tabTracking">
-                    <span class="tab-icon">📍</span>
-                    <span class="tab-label">Track</span>
-                </button>
-            </div>
+<!-- 🔥 HEADER -->
+<div class="header">
+    <h2>👨‍👧 Caretaker Dashboard</h2>
+    <button class="logout" onclick="logout()">Logout</button>
+</div>
 
-            <div class="nav-footer">
-                <div class="user-badge">
-                    <span class="user-avatar caretaker-avatar">👨‍👧</span>
-                    <span class="user-name">Caretaker</span>
-                </div>
-                <a href="/logout" class="logout-btn">Logout</a>
-            </div>
-        </nav>
+<div class="container">
 
-        <!-- Main Content -->
-        <main class="main-content">
-            <!-- Top Bar -->
-            <header class="top-bar">
-                <div>
-                    <h1 class="page-title" id="pageTitle">Patient Vitals</h1>
-                    <p class="page-subtitle">Monitoring: <strong>{{ user.patient_name }}</strong> · ID: <strong>{{ user_id }}</strong></p>
-                </div>
-                <div class="top-bar-right">
-                    <div class="connection-chip" id="connectionChip">
-                        <span class="conn-dot connected"></span>
-                        <span id="connectionText">Connected</span>
-                    </div>
-                    <div class="time-chip" id="liveTime"></div>
-                </div>
-            </header>
+<!-- 🚨 ALERT -->
+<div id="alertBox" class="alert normal">System Normal</div>
 
-            <!-- TAB: Vitals (Read-Only view of patient data) -->
-            <section class="tab-content active" id="contentVitals">
-                <div class="caretaker-grid">
-                    <!-- Status Card -->
-                    <div class="widget status-card" id="statusCard">
-                        <h2>Patient Status</h2>
-                        <div class="status-indicator" id="statusValue">AWAITING</div>
-                        <p class="status-subtext">Real-time AI Analysis</p>
-                    </div>
+<div class="card">
+    ❤️ HR: <span id="hr">--</span>
+</div>
 
-                    <!-- Vitals Row -->
-                    <div class="widget metric-card">
-                        <div class="metric-label">Heart Rate</div>
-                        <div class="metric-big" id="ctHR">--</div>
-                        <div class="metric-unit">BPM</div>
-                    </div>
-                    <div class="widget metric-card">
-                        <div class="metric-label">SpO2</div>
-                        <div class="metric-big" id="ctSpO2">--</div>
-                        <div class="metric-unit">%</div>
-                    </div>
+<div class="card">
+    🫁 SpO2: <span id="spo2">--</span>
+</div>
 
+<!-- 🔥 CHARTS -->
+<div class="chart-row">
 
-                    <!-- Patient Info -->
-                    <div class="widget patient-info-card span-full">
-                        <h3>Patient Information</h3>
-                        <div class="info-grid">
-                            <div class="info-item"><span class="info-key">Name</span><span class="info-val">{{ user.patient_name }}</span></div>
-                            <div class="info-item"><span class="info-key">Age</span><span class="info-val">{{ user.age }} yrs</span></div>
-                            <div class="info-item"><span class="info-key">Blood Group</span><span class="info-val">{{ user.blood_group }}</span></div>
-                            <div class="info-item"><span class="info-key">Emergency</span><span class="info-val">{{ user.emergency_contact }}</span></div>
-                        </div>
-                    </div>
-
-                    <!-- Mini Heart Chart -->
-                    <div class="widget chart-widget span-full">
-                        <h3>Heart Rate Monitor</h3>
-                        <div class="chart-container mini-chart">
-                            <canvas id="ctHrChart"></canvas>
-                        </div>
-                    </div>
-
-                    <!-- Fall + Location Quick -->
-                    <div class="widget quick-info-card">
-                        <h3>Fall Status</h3>
-                        <div class="quick-status" id="ctFall">All Clear</div>
-                    </div>
-                    <div class="widget quick-info-card">
-                        <h3>Location</h3>
-                        <div class="quick-status gps-text" id="ctLocation">Acquiring...</div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- TAB: Alerts / Notifications -->
-            <section class="tab-content" id="contentAlerts">
-                <div class="alerts-container">
-                    <div class="alerts-header">
-                        <h3>Real-Time Notifications</h3>
-                        <button class="clear-alerts-btn" id="clearAlerts">Clear All</button>
-                    </div>
-                    <div class="alerts-feed" id="alertsFeed">
-                        <div class="empty-alerts">
-                            <span class="empty-icon">🔕</span>
-                            <p>No alerts yet. You'll be notified here in real-time if any anomaly or fall is detected.</p>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- TAB: Tracking -->
-            <section class="tab-content" id="contentTracking">
-                <div class="location-grid">
-                    <div class="widget map-widget">
-                        <h3>Patient Location</h3>
-                        <div class="map-display">
-                            <div id="caretakerMap" style="height: 350px; width: 100%; border-radius: 12px; z-index: 1;"></div>
-                            <p id="ctGpsLocation" class="gps-coords" style="margin-top: 10px;">Acquiring satellites...</p>
-                        </div>
-                        <div class="gps-meta">
-                            <div class="gps-item"><span class="gps-label">Last Update</span><span id="ctGpsTime">--</span></div>
-                            <div class="gps-item"><span class="gps-label">Status</span><span class="gps-active">Active Tracking</span></div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-        </main>
+    <div class="card">
+        <h3>❤️ Heart Rate</h3>
+        <canvas id="hrChart"></canvas>
     </div>
 
-    <!-- Notification Toast (pops up for critical alerts) -->
-    <div class="toast-container" id="toastContainer"></div>
-
-    <!-- Error Overlay -->
-    <div id="errorOverlay" class="hidden">
-        <div class="error-box">
-            <h2>⚠ CONNECTION LOST</h2>
-            <p id="errorMessage">Connection to patient device lost</p>
-            <button onclick="document.getElementById('errorOverlay').classList.add('hidden')">Dismiss</button>
-        </div>
+    <div class="card">
+        <h3>🫁 SpO2</h3>
+        <canvas id="spo2Chart"></canvas>
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-    <script src="{{ url_for('static', filename='js/caretaker.js') }}"></script>
+</div>
+
+<!-- 🗺️ MAP -->
+<div class="card">
+    <h3>🗺️ Live Location</h3>
+    <div id="map"></div>
+</div>
+
+</div>
+
+<script>
+
+let labels = [];
+let hrData = [];
+let spo2Data = [];
+
+/* Charts */
+const hrChart = new Chart(document.getElementById("hrChart"), {
+    type:'line',
+    data:{
+        labels:labels,
+        datasets:[{
+            label:'Heart Rate',
+            data:hrData,
+            borderColor:'#ef4444',
+            tension:0.4
+        }]
+    }
+});
+
+const spo2Chart = new Chart(document.getElementById("spo2Chart"), {
+    type:'line',
+    data:{
+        labels:labels,
+        datasets:[{
+            label:'SpO2',
+            data:spo2Data,
+            borderColor:'#3b82f6',
+            tension:0.4
+        }]
+    }
+});
+
+/* MAP */
+let map = L.map('map').setView([20,77],5);
+
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 18
+}).addTo(map);
+
+let marker = L.marker([20,77]).addTo(map);
+
+/* DATA FETCH */
+async function fetchData(){
+    let res = await fetch('/latest');
+    let d = await res.json();
+
+    document.getElementById("hr").innerText = d.heart_rate;
+    document.getElementById("spo2").innerText = d.spo2;
+
+    let time = new Date().toLocaleTimeString();
+
+    labels.push(time);
+    hrData.push(d.heart_rate);
+    spo2Data.push(d.spo2);
+
+    if(labels.length > 20){
+        labels.shift();
+        hrData.shift();
+        spo2Data.shift();
+    }
+
+    hrChart.update();
+    spo2Chart.update();
+
+    /* MAP UPDATE */
+    if(d.latitude && d.longitude && d.latitude != 0){
+        marker.setLatLng([d.latitude, d.longitude]);
+        map.setView([d.latitude, d.longitude], 16);
+    }
+
+    /* ALERT SYSTEM */
+    let alertBox = document.getElementById("alertBox");
+
+    if(d.fall_detected){
+        alertBox.innerText = "🚨 FALL DETECTED!";
+        alertBox.className = "alert danger";
+    }
+    else if(d.heart_rate > 120 || d.heart_rate < 50){
+        alertBox.innerText = "⚠️ Abnormal Heart Rate";
+        alertBox.className = "alert warning";
+    }
+    else if(d.spo2 < 92){
+        alertBox.innerText = "⚠️ Low SpO2";
+        alertBox.className = "alert warning";
+    }
+    else{
+        alertBox.innerText = "✅ System Normal";
+        alertBox.className = "alert normal";
+    }
+}
+
+setInterval(fetchData, 2000);
+
+/* LOGOUT */
+function logout(){
+    window.location.href = "/logout";
+}
+
+</script>
+
 </body>
 </html>

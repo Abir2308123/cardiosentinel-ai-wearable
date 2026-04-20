@@ -1,355 +1,237 @@
-# ==========================================================================
-# CardioSentinel - AI-Powered Cardiac Risk Monitoring (Edge Backend)
-# ==========================================================================
-# MODEL REQUIREMENT:
-#   Place your trained Random Forest model file in the project root as:
-#       trained_model.pkl
-#   The model must be a scikit-learn classifier saved with joblib.dump()
-#   and must expect exactly 4 numeric features:
-#       [heart_rate (bpm), spo2 (%), hrv (ms), motion_energy (m/s²)]
-#   Output: 0 = Normal, 1 = Arrhythmia / Risk Detected
-#
-#   If trained_model.pkl is missing, the system falls back to a rule-based
-#   threshold detector automatically.
-# ==========================================================================
-
-import time
-import json
-import threading
-import numpy as np
-import joblib
-import logging
+from flask import Flask, request, jsonify, render_template, redirect, session
+import sqlite3
 from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify
-from flask_socketio import SocketIO, emit, join_room, leave_room
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-
-# Attempt to load RPi hardware libraries, fallback to mock classes for development
-try:
-    import smbus2
-    import serial
-    HARDWARE_AVAILABLE = True
-except ImportError:
-    HARDWARE_AVAILABLE = False
-    print("WARNING: Hardware libraries (smbus2, serial) not found. Running in MOCK Mode.")
+from werkzeug.security import generate_password_hash, check_password_hash
+import joblib
 
 app = Flask(__name__)
-app.secret_key = 'cardiosentinel_secret_key_2026'
-# Allow CORS for local dev testing
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+app.secret_key = "cardiosentinel_secret"
 
-# ---------------------------------------------------------
-# Mock Hardware Classes (for Windows/Local testing bounds)
-# ---------------------------------------------------------
-class MockSMBus:
-    def read_byte_data(self, addr, reg): return np.random.randint(0, 255)
-    def write_byte_data(self, addr, reg, val): pass
+# -------- GLOBAL DATA --------
+latest_data = {}
+DB_PATH = "database.db"
 
-class MockSerial:
-    def __init__(self): self.in_waiting = 1
-    def readline(self): 
-        return b"$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47\r\n"
-
-# ---------------------------------------------------------
-# Hardware Initialization
-# ---------------------------------------------------------
-if HARDWARE_AVAILABLE:
-    bus = smbus2.SMBus(1)
-    gps_serial = serial.Serial('/dev/ttyS0', 9600, timeout=1)
-else:
-    bus = MockSMBus()
-    gps_serial = MockSerial()
-
-MAX30102_ADDR = 0x57
-MPU6050_ADDR = 0x68
-
-# ---------------------------------------------------------
-# Load Trained ML Model (trained_model.pkl)
-# Falls back to rule-based thresholds if file is missing.
-# ---------------------------------------------------------
-MODEL_PATH = 'trained_model.pkl'
+# -------- LOAD ML MODEL --------
+MODEL_PATH = "trained_model.pkl"
 model = None
-USE_ML = False
 
 try:
     model = joblib.load(MODEL_PATH)
-    USE_ML = True
-    logging.info(f"Trained ML model loaded successfully from '{MODEL_PATH}'.")
-    # Validate expected input shape by inspecting n_features
-    expected_features = getattr(model, 'n_features_in_', None)
-    if expected_features and expected_features != 4:
-        logging.warning(f"Model expects {expected_features} features but pipeline supplies 4. Predictions may fail.")
-except FileNotFoundError:
-    logging.critical(f"CRITICAL: '{MODEL_PATH}' not found! Falling back to rule-based threshold system.")
+    print("✅ ML model loaded successfully")
+    print(f"📊 Model expects {model.n_features_in_} features")
 except Exception as e:
-    logging.critical(f"CRITICAL: Failed to load model - {e}. Falling back to rule-based threshold system.")
+    print("⚠️ Model not loaded:", e)
 
-def rule_based_predict(hr, spo2, hrv, motion_energy):
-    """Fallback threshold-based arrhythmia detector when ML model is unavailable.
-    These thresholds are tuned to avoid false positives during mock-sensor polling."""
-    if hr > 130 or hr < 40:
-        return 1  # Tachycardia or Bradycardia
-    if spo2 < 90:
-        return 1  # Hypoxia
-    if hrv < 3:
-        return 1  # Dangerously low HRV (note: mock loop produces very low std)
-    if motion_energy > 30:
-        return 1  # Extreme motion / possible seizure
-    return 0
+# -------- DATABASE INIT --------
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
 
-# ---------------------------------------------------------
-# User database (in-memory for hackathon demo)
-# In production, use a real database
-# ---------------------------------------------------------
-users_db = {
-    'patient001': {
-        'password': 'cardio123',
-        'patient_name': 'John Doe',
-        'age': 67,
-        'blood_group': 'O+',
-        'emergency_contact': '+91 98765 43210'
-    },
-    'demo': {
-        'password': 'demo',
-        'patient_name': 'Demo Patient',
-        'age': 55,
-        'blood_group': 'A+',
-        'emergency_contact': '+91 12345 67890'
-    }
-}
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password TEXT
+        )
+    """)
 
-# Store recent alerts for caretaker notification feed
-alert_history = []
-MAX_ALERTS = 50
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS sensor_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            heart_rate INTEGER,
+            spo2 INTEGER,
+            g_force REAL,
+            fall_detected INTEGER,
+            latitude REAL,
+            longitude REAL,
+            prediction INTEGER
+        )
+    """)
 
-# Store latest sensor snapshot for caretaker initial load
-latest_sensor_data = {}
+    conn.commit()
+    conn.close()
 
-def send_alert(message):
-    """Log alert and push to caretaker notification feed"""
-    timestamp = datetime.now().strftime('%H:%M:%S')
-    alert_entry = {'message': message, 'time': timestamp}
-    alert_history.append(alert_entry)
-    if len(alert_history) > MAX_ALERTS:
-        alert_history.pop(0)
-    
-    # Push real-time notification to all caretaker clients
-    socketio.emit('caretaker_alert', alert_entry, room='caretakers')
-    print(f"\n[ALERT TRIGGERED] -> {message}")
+# -------- CREATE DEFAULT USER --------
+def create_default_user():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
 
-# ---------------------------------------------------------
-# Data Processing & Filters
-# ---------------------------------------------------------
-class SignalProcessor:
-    def __init__(self, window_size=10):
-        self.hr_window = []
-        self.spo2_window = []
-        self.window_size = window_size
-        self.last_rr_time = time.time()
-        self.rr_intervals = []
+    try:
+        c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (
+            "admin",
+            generate_password_hash("admin123")
+        ))
+        conn.commit()
+        print("✅ Default user: admin / admin123")
+    except:
+        pass
 
-    def moving_average(self, data_list, new_val):
-        data_list.append(new_val)
-        if len(data_list) > self.window_size:
-            data_list.pop(0)
-        return sum(data_list) / len(data_list)
+    conn.close()
 
-    def compute_motion_energy(self, accel_y, accel_z):
-        """Compute motion energy magnitude from accelerometer axes (m/s²).
-        Converts raw byte readings (0-255) to signed g-force values,
-        then computes the vector magnitude as the motion energy metric."""
-        # Convert unsigned byte to signed (-128 to 127) and scale to g-force
-        ay = (accel_y - 128) / 16.0  # ~±8g range on MPU6050
-        az = (accel_z - 128) / 16.0
-        return float(np.sqrt(ay**2 + az**2))
+# -------- LOGIN --------
+@app.route('/login', methods=['GET', 'POST'])
+def login():
 
-    def extract_features(self, raw_hr, raw_spo2, accel_y, accel_z):
-        """Extract the 4-feature vector required by the trained model.
-        Returns: {mean_hr, spo2_trend, hrv, motion_energy}"""
-        smooth_hr = self.moving_average(self.hr_window, raw_hr)
-        smooth_spo2 = self.moving_average(self.spo2_window, raw_spo2)
-
-        current_time = time.time()
-        rr_interval = (current_time - self.last_rr_time) * 1000
-        self.last_rr_time = current_time
-        
-        self.rr_intervals.append(rr_interval)
-        if len(self.rr_intervals) > 20: self.rr_intervals.pop(0)
-        
-        hrv = np.std(self.rr_intervals) if len(self.rr_intervals) > 5 else 50.0
-        motion_energy = self.compute_motion_energy(accel_y, accel_z)
-
-        return {
-            'mean_hr': smooth_hr,
-            'spo2_trend': smooth_spo2,
-            'hrv': hrv,
-            'motion_energy': motion_energy
-        }
-
-processor = SignalProcessor()
-
-# ---------------------------------------------------------
-# Background Sensor Polling Thread
-# ---------------------------------------------------------
-def sensor_loop():
-    global latest_sensor_data
-    print("Starting sensor polling loop...")
-    fall_debounce = 0
-    
-    while True:
+    if request.method == 'POST':
         try:
-            raw_hr = np.random.uniform(60, 100)
-            raw_spo2 = np.random.uniform(96, 100)
+            username = request.form.get('username')
+            password = request.form.get('password')
+            role = request.form.get('role')
 
-            if np.random.random() > 0.95: 
-                raw_hr = 140
-                raw_spo2 = 88
+            if not username or not password:
+                return render_template('login.html', error="Missing credentials")
 
-            accel_y = bus.read_byte_data(MPU6050_ADDR, 0x3D)
-            accel_z = bus.read_byte_data(MPU6050_ADDR, 0x3F)
-            fall_detected = False
-            if time.time() - fall_debounce > 10 and np.random.random() > 0.98:
-                fall_detected = True
-                fall_debounce = time.time()
-                send_alert("EMERGENCY: Patient Fall Detected!")
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("SELECT password FROM users WHERE username=?", (username,))
+            result = c.fetchone()
+            conn.close()
 
-            features = processor.extract_features(raw_hr, raw_spo2, accel_y, accel_z)
+            if result and check_password_hash(result[0], password):
+                session['user'] = username
 
-            # --- ML Inference (or rule-based fallback) ---
-            inference_start = time.time()
-            status = "Normal"
-            confidence = None
+                if role == "patient":
+                    return redirect('/patient')
+                else:
+                    return redirect('/caretaker')
 
-            hr_val = features['mean_hr']
-            spo2_val = features['spo2_trend']
-            hrv_val = features['hrv']
-            me_val = features['motion_energy']
-
-            if USE_ML and model is not None:
-                try:
-                    X_infer = np.array([[hr_val, spo2_val, hrv_val, me_val]])
-                    pred = model.predict(X_infer)[0]
-                    status = "Abnormal" if pred == 1 else "Normal"
-                    # Optional: extract confidence from predict_proba
-                    if hasattr(model, 'predict_proba'):
-                        proba = model.predict_proba(X_infer)[0]
-                        confidence = round(float(max(proba)) * 100, 1)
-                except Exception as e:
-                    logging.error(f"ML prediction failed ({e}). Using rule-based fallback.")
-                    pred = rule_based_predict(hr_val, spo2_val, hrv_val, me_val)
-                    status = "Abnormal" if pred == 1 else "Normal"
             else:
-                pred = rule_based_predict(hr_val, spo2_val, hrv_val, me_val)
-                status = "Abnormal" if pred == 1 else "Normal"
-
-            inference_time = (time.time() - inference_start) * 1000
-            
-            if status == "Abnormal":
-                send_alert(f"WARNING: Cardiac Anomaly! HR: {hr_val:.1f}, SpO2: {spo2_val:.1f}")
-
-            location = "Tracking GPS..." 
-            if gps_serial.in_waiting > 0:
-                line = gps_serial.readline().decode('ascii', errors='replace')
-                if "$GPGGA" in line:
-                    location = "48°07.038'N, 11°31.000'E"
-
-            payload = {
-                'raw_hr': round(raw_hr, 2),
-                'raw_spo2': round(raw_spo2, 2),
-                'mean_hr': round(hr_val, 2),
-                'hrv': round(hrv_val, 2),
-                'spo2': round(spo2_val, 2),
-                'motion_energy': round(me_val, 2),
-                'status': status,
-                'fall_detected': fall_detected,
-                'location': location,
-                'latency_ms': round(inference_time, 2),
-                'timestamp': datetime.now().strftime('%H:%M:%S')
-            }
-            if confidence is not None:
-                payload['confidence'] = confidence
-
-            latest_sensor_data = payload
-
-            # Emit to both patient and caretaker rooms
-            socketio.emit('sensor_data', payload, room='patients')
-            socketio.emit('sensor_data', payload, room='caretakers')
-            time.sleep(0.5)
+                return render_template('login.html', error="Invalid username or password")
 
         except Exception as e:
-            print(f"Hardware Error: {e}")
-            socketio.emit('system_error', {'error': str(e)})
-            time.sleep(1)
+            return f"Error: {str(e)}", 500
 
-# ---------------------------------------------------------
-# Flask Routes
-# ---------------------------------------------------------
-@app.route('/')
-def landing():
-    if 'user_id' in session:
-        if session.get('role') == 'patient':
-            return redirect(url_for('patient_dashboard'))
-        else:
-            return redirect(url_for('caretaker_dashboard'))
     return render_template('login.html')
 
-@app.route('/login', methods=['POST'])
-def login():
-    user_id = request.form.get('user_id', '').strip()
-    password = request.form.get('password', '').strip()
-    role = request.form.get('role', 'patient')
-
-    if user_id in users_db and users_db[user_id]['password'] == password:
-        session['user_id'] = user_id
-        session['role'] = role
-        session['patient_name'] = users_db[user_id]['patient_name']
-        if role == 'patient':
-            return redirect(url_for('patient_dashboard'))
-        else:
-            return redirect(url_for('caretaker_dashboard'))
-    else:
-        return render_template('login.html', error='Invalid User ID or Password')
-
+# -------- LOGOUT --------
 @app.route('/logout')
 def logout():
-    session.clear()
-    return redirect(url_for('landing'))
+    session.pop('user', None)
+    return redirect('/login')
 
+# -------- ROOT --------
+@app.route('/')
+def root():
+    if 'user' not in session:
+        return redirect('/login')
+    return redirect('/patient')
+
+# -------- PATIENT --------
 @app.route('/patient')
-def patient_dashboard():
-    if 'user_id' not in session:
-        return redirect(url_for('landing'))
-    user_info = users_db.get(session['user_id'], {})
-    return render_template('patient.html', user=user_info, user_id=session['user_id'])
+def patient():
+    if 'user' not in session:
+        return redirect('/login')
+    return render_template('patient.html')
 
+# -------- CARETAKER --------
 @app.route('/caretaker')
-def caretaker_dashboard():
-    if 'user_id' not in session:
-        return redirect(url_for('landing'))
-    user_info = users_db.get(session['user_id'], {})
-    return render_template('caretaker.html', user=user_info, user_id=session['user_id'])
+def caretaker():
+    if 'user' not in session:
+        return redirect('/login')
+    return render_template('caretaker.html')
 
-@app.route('/api/alerts')
-def get_alerts():
-    """REST endpoint for caretaker to load alert history"""
-    return jsonify(alert_history[-20:])
+# -------- LIVE DATA --------
+@app.route('/latest')
+def latest():
+    return latest_data
 
-# ---------------------------------------------------------
-# WebSocket Events
-# ---------------------------------------------------------
-@socketio.on('join')
-def on_join(data):
-    role = data.get('role', 'patient')
-    if role == 'caretaker':
-        join_room('caretakers')
-        # Send latest snapshot immediately so caretaker sees current state
-        if latest_sensor_data:
-            emit('sensor_data', latest_sensor_data)
-    else:
-        join_room('patients')
+# -------- RECEIVE SENSOR DATA --------
+@app.route('/api/sensor-data', methods=['POST'])
+def receive_sensor_data():
+    try:
+        data = request.get_json()
 
+        heart_rate = data.get("heart_rate", 0)
+        spo2 = data.get("spo2", 0)
+        g_force = data.get("g_force", 0)
+        fall_detected = data.get("fall_detected", False)
+        latitude = data.get("latitude", 0)
+        longitude = data.get("longitude", 0)
+
+        print("\n📡 DATA RECEIVED")
+        print(data)
+
+        # -------- ML PREDICTION --------
+        prediction = None
+
+        try:
+            if model and heart_rate > 0 and spo2 > 0:
+
+                # 🔥 Estimate HRV (approximation)
+                hrv = max(20, min(100, 60000 / max(heart_rate, 1)))
+
+                # 🔥 Use G-force as motion energy
+                motion_energy = g_force
+
+                features = [[
+                    heart_rate,
+                    spo2,
+                    hrv,
+                    motion_energy
+                ]]
+
+                prediction = int(model.predict(features)[0])
+
+                print(f"🧠 Prediction: {prediction}")
+                print(f"📊 Features → HR:{heart_rate}, SpO2:{spo2}, HRV:{hrv:.1f}, Motion:{motion_energy}")
+
+        except Exception as e:
+            print("ML Error:", e)
+
+        # -------- STORE LATEST --------
+        global latest_data
+        latest_data = {
+            **data,
+            "prediction": prediction
+        }
+
+        # -------- SAVE TO DATABASE --------
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        c.execute("""
+            INSERT INTO sensor_data 
+            (timestamp, heart_rate, spo2, g_force, fall_detected, latitude, longitude, prediction)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            str(datetime.now()),
+            heart_rate,
+            spo2,
+            g_force,
+            int(fall_detected),
+            latitude,
+            longitude,
+            prediction
+        ))
+
+        conn.commit()
+        conn.close()
+
+        return jsonify({
+            "status": "success",
+            "prediction": prediction
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# -------- HISTORY --------
+@app.route('/history')
+def history():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("SELECT * FROM sensor_data ORDER BY id DESC LIMIT 50")
+    rows = c.fetchall()
+    conn.close()
+
+    return jsonify(rows)
+
+# -------- MAIN --------
 if __name__ == '__main__':
-    sensor_thread = threading.Thread(target=sensor_loop, daemon=True)
-    sensor_thread.start()
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
+    init_db()
+    create_default_user()
+
+    print("\n🔥 SERVER STARTED")
+    app.run(host='0.0.0.0', port=5000)

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CardioSentinel Pro</title>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Leaflet (Map) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Segoe UI';
+            background: #0f172a;
+            color: white;
+        }
+
+        header {
+            padding: 15px;
+            text-align: center;
+            background: #020617;
+            font-size: 22px;
+            font-weight: bold;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 20px;
+        }
+
+        .card {
+            background: #1e293b;
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+
+        canvas {
+            max-height: 250px;
+        }
+
+        #map {
+            height: 300px;
+            border-radius: 10px;
+        }
+
+        .alert {
+            padding: 10px;
+            margin: 10px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .danger { background: #dc2626; }
+        .warning { background: #f59e0b; }
+        .normal { background: #16a34a; }
+    </style>
+</head>
+
+<body>
+
+<header>🚀 CardioSentinel Pro Dashboard</header>
+
+<div id="alertBox" class="alert normal">System Normal</div>
+
+<div class="container">
+
+    <div class="card">
+        <h3>❤️ Heart Rate</h3>
+        <canvas id="hrChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3>🫁 SpO2</h3>
+        <canvas id="spo2Chart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3>📉 G-Force</h3>
+        <p id="g">--</p>
+    </div>
+
+    <div class="card">
+        <h3>🗺️ Live Location</h3>
+        <div id="map"></div>
+    </div>
+
+</div>
+
+<script>
+
+// ---------- CHART SETUP ----------
+let labels = [];
+let hrData = [];
+let spo2Data = [];
+
+const hrChart = new Chart(document.getElementById("hrChart"), {
+    type: 'line',
+    data: {
+        labels: labels,
+        datasets: [{
+            label: 'Heart Rate',
+            data: hrData,
+            borderColor: '#ef4444',
+            tension: 0.4
+        }]
+    }
+});
+
+const spo2Chart = new Chart(document.getElementById("spo2Chart"), {
+    type: 'line',
+    data: {
+        labels: labels,
+        datasets: [{
+            label: 'SpO2',
+            data: spo2Data,
+            borderColor: '#3b82f6',
+            tension: 0.4
+        }]
+    }
+});
+
+// ---------- MAP SETUP ----------
+let map = L.map('map').setView([20, 77], 5);
+
+// Satellite view
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 18
+}).addTo(map);
+
+let marker = L.marker([20,77]).addTo(map);
+
+// ---------- FETCH DATA ----------
+async function fetchData() {
+    try {
+        let res = await fetch('/latest');
+        let data = await res.json();
+
+        let time = new Date().toLocaleTimeString();
+
+        // Charts
+        labels.push(time);
+        hrData.push(data.heart_rate);
+        spo2Data.push(data.spo2);
+
+        if (labels.length > 20) {
+            labels.shift();
+            hrData.shift();
+            spo2Data.shift();
+        }
+
+        hrChart.update();
+        spo2Chart.update();
+
+        // G-force
+        document.getElementById("g").innerText = data.g_force;
+
+        // MAP UPDATE
+        if (data.latitude !== 0 && data.longitude !== 0) {
+            marker.setLatLng([data.latitude, data.longitude]);
+            map.setView([data.latitude, data.longitude], 16);
+        }
+
+        // ALERT SYSTEM
+        let alertBox = document.getElementById("alertBox");
+
+        if (data.fall_detected) {
+            alertBox.innerText = "🚨 FALL DETECTED!";
+            alertBox.className = "alert danger";
+        }
+        else if (data.heart_rate > 120 || data.heart_rate < 50) {
+            alertBox.innerText = "⚠️ Abnormal Heart Rate";
+            alertBox.className = "alert warning";
+        }
+        else if (data.spo2 < 92) {
+            alertBox.innerText = "⚠️ Low SpO2";
+            alertBox.className = "alert warning";
+        }
+        else {
+            alertBox.innerText = "✅ System Normal";
+            alertBox.className = "alert normal";
+        }
+
+    } catch (e) {
+        console.log("Error:", e);
+    }
+}
+
+setInterval(fetchData, 2000);
+
+</script>
+
+</body>
+</html>
